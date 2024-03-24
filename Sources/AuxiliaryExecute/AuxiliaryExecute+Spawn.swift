@@ -15,6 +15,28 @@ private func posix_spawn_file_actions_addchdir_np(
     _ dir: UnsafePointer<Int8>
 ) -> Int32
 
+@_silgen_name("posix_spawnattr_set_persona_np")
+@discardableResult
+private func posix_spawnattr_set_persona_np(
+    _ attr: UnsafeMutablePointer<posix_spawnattr_t?>,
+    _ persona_id: uid_t,
+    _ flags: UInt32
+) -> Int32
+
+@_silgen_name("posix_spawnattr_set_persona_uid_np")
+@discardableResult
+private func posix_spawnattr_set_persona_uid_np(
+    _ attr: UnsafeMutablePointer<posix_spawnattr_t?>,
+    _ persona_id: uid_t
+) -> Int32
+
+@_silgen_name("posix_spawnattr_set_persona_gid_np")
+@discardableResult
+private func posix_spawnattr_set_persona_gid_np(
+    _ attr: UnsafeMutablePointer<posix_spawnattr_t?>,
+    _ persona_id: uid_t
+) -> Int32
+
 public extension AuxiliaryExecute {
     /// call posix spawn to begin execute
     /// - Parameters:
@@ -22,6 +44,8 @@ public extension AuxiliaryExecute {
     ///   - args: arg to pass to the binary, exclude argv[0] which is the path itself. eg: ["nya"]
     ///   - environment: any environment to be appended/overwrite when calling posix spawn. eg: ["mua" : "nya"]
     ///   - workingDirectory: chdir
+    ///   - uid: uid for process
+    ///   - gid: gid for process
     ///   - timeout: any wall timeout if lager than 0, in seconds. eg: 6
     ///   - output: a block call from pipeControlQueue in background when buffer from stdout or stderr available for read
     /// - Returns: execution receipt, see it's definition for details
@@ -31,6 +55,8 @@ public extension AuxiliaryExecute {
         args: [String] = [],
         environment: [String: String] = [:],
         workingDirectory: String? = nil,
+        uid: uid_t? = nil,
+        gid: uid_t? = nil,
         timeout: Double = 0,
         setPid: ((pid_t) -> Void)? = nil,
         output: ((String) -> Void)? = nil
@@ -43,6 +69,8 @@ public extension AuxiliaryExecute {
             args: args,
             environment: environment,
             workingDirectory: workingDirectory,
+            uid: uid,
+            gid: gid,
             timeout: timeout,
             setPid: setPid
         ) { str in
@@ -63,6 +91,8 @@ public extension AuxiliaryExecute {
     ///   - args: arg to pass to the binary, exclude argv[0] which is the path itself. eg: ["nya"]
     ///   - environment: any environment to be appended/overwrite when calling posix spawn. eg: ["mua" : "nya"]
     ///   - workingDirectory: chdir
+    ///   - uid: uid for process
+    ///   - gid: gid for process
     ///   - timeout: any wall timeout if lager than 0, in seconds. eg: 6
     ///   - stdout: a block call from pipeControlQueue in background when buffer from stdout available for read
     ///   - stderr: a block call from pipeControlQueue in background when buffer from stderr available for read
@@ -72,6 +102,8 @@ public extension AuxiliaryExecute {
         args: [String] = [],
         environment: [String: String] = [:],
         workingDirectory: String? = nil,
+        uid: uid_t? = nil,
+        gid: uid_t? = nil,
         timeout: Double = 0,
         setPid: ((pid_t) -> Void)? = nil,
         stdoutBlock: ((String) -> Void)? = nil,
@@ -84,6 +116,8 @@ public extension AuxiliaryExecute {
             args: args,
             environment: environment,
             workingDirectory: workingDirectory,
+            uid: uid,
+            gid: gid,
             timeout: timeout,
             setPid: setPid,
             stdoutBlock: stdoutBlock,
@@ -102,6 +136,8 @@ public extension AuxiliaryExecute {
     ///   - args: arg to pass to the binary, exclude argv[0] which is the path itself. eg: ["nya"]
     ///   - environment: any environment to be appended/overwrite when calling posix spawn. eg: ["mua" : "nya"]
     ///   - workingDirectory: chdir file action
+    ///   - uid: uid for process
+    ///   - gid: gid for process
     ///   - timeout: any wall timeout if lager than 0, in seconds. eg: 6
     ///   - setPid: called sync when pid available
     ///   - stdoutBlock: a block call from pipeControlQueue in background when buffer from stdout available for read
@@ -112,6 +148,8 @@ public extension AuxiliaryExecute {
         args: [String] = [],
         environment: [String: String] = [:],
         workingDirectory: String? = nil,
+        uid: uid_t? = nil,
+        gid: uid_t? = nil,
         timeout: Double = 0,
         setPid: ((pid_t) -> Void)? = nil,
         stdoutBlock: ((String) -> Void)? = nil,
@@ -138,7 +176,10 @@ public extension AuxiliaryExecute {
             completionBlock?(receipt)
             return
         }
-
+        
+        var attr: posix_spawnattr_t?
+        posix_spawnattr_init(&attr)
+        
         // MARK: PREPARE FILE ACTION -
 
         var fileActions: posix_spawn_file_actions_t?
@@ -152,6 +193,13 @@ public extension AuxiliaryExecute {
 
         if let workingDirectory = workingDirectory {
             posix_spawn_file_actions_addchdir_np(&fileActions, workingDirectory)
+        }
+        
+        if let uid = uid,
+           let gid = gid {
+            posix_spawnattr_set_persona_np(&attr, 99, 1)
+            posix_spawnattr_set_persona_uid_np(&attr, uid)
+            posix_spawnattr_set_persona_gid_np(&attr, gid)
         }
         
         defer { posix_spawn_file_actions_destroy(&fileActions) }
@@ -199,7 +247,7 @@ public extension AuxiliaryExecute {
         // MARK: NOW POSIX_SPAWN -
 
         var pid: pid_t = 0
-        let spawnStatus = posix_spawn(&pid, command, &fileActions, nil, argv + [nil], realEnv + [nil])
+        let spawnStatus = posix_spawn(&pid, command, &fileActions, &attr, argv + [nil], realEnv + [nil])
         if spawnStatus != 0 {
             let receipt = ExecuteReceipt.failure(error: .posixSpawnFailed)
             completionBlock?(receipt)
