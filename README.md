@@ -1,6 +1,6 @@
 # AuxiliaryExecute
 
-A Swift wrapper for system shell over posix_spawn with search path and env support.
+A Swift wrapper for system shell over posix_spawn with search path and env support. This fork add supports for uid and gid when spawning a process.
 
 ## Usage
 
